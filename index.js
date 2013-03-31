@@ -15,7 +15,7 @@ var _ = -1
   , STATE_OBJECT_OFS_DELTA = ++_
   , STATE_OBJECT_REF_DELTA = ++_
   , STATE_INFLATE = ++_
-  , STATE_INFLATE_CHECK = ++_
+  , STATE_BUFFERING = ++_
   , STATE_TRAILER_CKSUM = ++_
 
 var STATES = [
@@ -27,7 +27,7 @@ var STATES = [
   , 'STATE_OBJECT_OFS_DELTA'
   , 'STATE_OBJECT_REF_DELTA'
   , 'STATE_INFLATE'
-  , 'STATE_INFLATE_CHECK'
+  , 'STATE_BUFFERING'
   , 'STATE_TRAILER_CKSUM'
 ]
 
@@ -38,6 +38,7 @@ function unpack(find) {
   var stream = through(write_, end)
     , state = STATE_HEADER_SIG
     , should_break = false
+    , buffer = []
     , accum = []
     , got = 0
     , expect
@@ -56,7 +57,7 @@ function unpack(find) {
     , type
     , cksum
 
-  var want = 4
+  var want = 4 
 
   return stream
 
@@ -65,12 +66,10 @@ function unpack(find) {
   }
 
   function end(buf) {
-    stream.queue(null)
   }
 
   function write(buf) {
-    while(buf.length && !should_break) {
-      console.log('\t\t\t\t\t\t\t\t', STATES[state], 'offset:'+offset, 'expect:'+expect, 'buf:'+buf.length, 'size:'+expanded_size)
+    while(!should_break && buf.length) {
       switch(state) {
         case STATE_HEADER_SIG: buf = read_signature(buf); break
         case STATE_HEADER_VERSION: buf = read_version(buf); break
@@ -80,7 +79,7 @@ function unpack(find) {
         case STATE_OBJECT_REF_DELTA: buf = read_ref_delta(buf); break
         case STATE_OBJECT: buf = read_object(buf); break
         case STATE_INFLATE: buf = read_inflate(buf); break
-        case STATE_INFLATE_CHECK: buf = read_inflate_check(buf); break
+        case STATE_BUFFERING: buffer.push(buf); should_break = true; break
         case STATE_TRAILER_CKSUM: buf = read_cksum(buf); break
       }
     }
@@ -96,7 +95,7 @@ function unpack(find) {
       become(STATE_HEADER_VERSION)
       return buf
     }
-    return take(4, buf)
+    return take(4 - got, buf)
   }
 
   function read_version(buf) { 
@@ -105,7 +104,7 @@ function unpack(find) {
       become(STATE_HEADER_OBJECT_COUNT)
       return buf
     }    
-    return take(4, buf)
+    return take(4 - got, buf)
   }
 
   function read_object_count(buf) {
@@ -115,7 +114,7 @@ function unpack(find) {
       become(expect ? STATE_OBJECT_HEADER : STATE_TRAILER_CKSUM)
       return buf
     }    
-    return take(4, buf)
+    return take(4 - got, buf)
   } 
 
   function read_object_header(buf) {
@@ -139,14 +138,6 @@ function unpack(find) {
 
       ++header_size
       expanded_size = size
-      console.log(
-          offset
-        , 'OBJECT:'
-        , type
-        , 'SIZE:'
-        , expanded_size
-        , expanded_size_array.map(function(x) { return x.toString(2) })
-      )
       become(type < 5 ? STATE_OBJECT :
              type === OFS_DELTA ? STATE_OBJECT_OFS_DELTA :
              type === REF_DELTA ? STATE_OBJECT_REF_DELTA : STATE_OBJECT_HEADER)
@@ -163,120 +154,73 @@ function unpack(find) {
 
       if(!(byt & 0x80)) {
         become(STATE_INFLATE)
-        inflate_until = inflate(expanded_size, got_ofs_delta)
+        inflate_until = inflate(expanded_size, got_inflate)
         return buf
       }
     }
-    return take(1, buf)
+    return take(1, buf, true)
   }
 
   function read_ref_delta(buf) {
     if(got === 20) {
       reference = Buffer.concat(accum, got)
-      inflate_until = inflate(expanded_size, got_ref_delta)
+      inflate_until = inflate(expanded_size, got_inflate)
       become(STATE_INFLATE)
       return buf
     }
-    return take(20, buf)
+    return take(20 - got, buf, true)
   }
 
   function read_object(buf) {
-    inflate_until = inflate(expanded_size, got_object)
+    inflate_until = inflate(expanded_size, got_inflate)
     become(STATE_INFLATE)
     return buf
   }
-
-  function got_ofs_delta(err, info) {
-    console.log('GOT_OFS_DELTA, INFLATE_UNTIL')
-    if(err) {
-      return stream.emit('error', err)
-    }
-
-    stream.queue(last_object = {
-      type: last_type
-    , data: apply_delta(info.data, data.data)
-    , offset: offset
-    })
-    offset += info.compressed + header_size
-    header_size = 0
-    become(STATE_INFLATE_CHECK)
-    console.log('±±±\\')
-    write(inflate_until.rest)
-    stream.resume()
-    console.log('±±±/')
-  }
-
-  function got_ref_delta(err, info) {
-    if(err) {
-      return stream.emit('error', err)
-    }
-
-    stream.pause()
-    find(reference, function(err, data) {
-      last_type = data.type
-
-      stream.queue(last_object = {
-        type: last_type
-      , data: apply_delta(info.data, data.data)
-      , offset: offset
-      })
-
-      offset += info.compressed + header_size
-      header_size = 0
-      become(STATE_INFLATE_CHECK)
-      console.log('≠≠≠\\')
-      write(inflate_until.rest)
-      stream.resume()
-      console.log('≠≠≠/')
-    })
-  }
-
-  function got_object(err, info) {
-    if(err) {
-      return stream.emit('error', err)
-    }
+  
+  function got_inflate(info) {
     last_type = type
 
     stream.queue(last_object = {
         type: last_type
-      , data: info.data
       , offset: offset
+      , data: info.data
+      , compressed: info.compressed
+      , header_size: header_size
     })
 
     offset += info.compressed + header_size
+    become(--expect ? STATE_OBJECT_HEADER : STATE_TRAILER_CKSUM)
     header_size = 0
-    become(STATE_INFLATE_CHECK)
-    console.log('---\\')
-    write(inflate_until.rest)
-    stream.resume()
-    console.log('---/')
+
+    buffer.unshift(info.rest)
+    while(buffer.length && state !== STATE_BUFFERING) {
+      write(buffer.shift())
+    }
   }
 
   function read_inflate(buf) {
-    inflate_until.write(buf)
+    become(STATE_BUFFERING)
+    inflate_until(buf, function(info) {
+      if(info) {
+        return got_inflate(info)
+      }
+      become(STATE_INFLATE)
+      if(buffer.length) {
+        write(buffer.shift())
+      }
+    })
     should_break = true
     return []
   }
-
-  function read_inflate_check(buf) {
-    if(got === want) {
-      if(want !== 4) { want = 4 }
-      become(--expect ? STATE_OBJECT_HEADER : STATE_TRAILER_CKSUM)
-      return buf
-    }
-
-    return take(want, buf)
-  } 
 
   function read_cksum(buf) {
     if(got === 20) {
       // and we've got the checksum
     }
-    return take(20, buf)
+    return take(20 - got, buf)
   }
 
   function become(st) {
-    console.log('\t\t\t\t\t\t\t\t', STATES[state], ' -> ', STATES[st])
     got =
     accum.length = 0
     state = st
