@@ -34,7 +34,7 @@ var STATES = [
 var OFS_DELTA = 6
   , REF_DELTA = 7
 
-function unpack(find) {
+function unpack() {
   var stream = through(write_, end)
     , state = STATE_HEADER_SIG
     , should_break = false
@@ -214,8 +214,11 @@ function unpack(find) {
   }
 
   function read_cksum(buf) {
-    if(got === 20) {
+    if(got === 20 || (buf.length === 20 && got === 0)) {
       // and we've got the checksum
+      stream.queue(null)
+      should_break = true
+      return
     }
     return take(20 - got, buf)
   }
@@ -242,11 +245,4 @@ function toarray(buf) {
     arr[i] = buf.readUInt8(i)
   }
   return arr
-}
-
-function pad(n) {
-  while(n.length !== 8) {
-    n = '0'+n
-  }
-  return n
 }
