@@ -1,10 +1,8 @@
 module.exports = unpack 
 
 var through = require('through')
-  , apply_delta = require('git-apply-delta')
-  , Buffer = require('buffer').Buffer
   , inflate = require('inflate-until')
-  , concat = require('concat-stream')
+  , Buffer = require('buffer').Buffer
 
 var _ = -1 
   , STATE_HEADER_SIG = ++_
