@@ -3,7 +3,7 @@ module.exports = unpack
 var through = require('through')
   , apply_delta = require('git-apply-delta')
   , Buffer = require('buffer').Buffer
-  , inflate = require('./inflate-until')
+  , inflate = require('inflate-until')
   , concat = require('concat-stream')
 
 var _ = -1 
