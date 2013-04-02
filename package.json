@@ -1,0 +1,28 @@
+{
+  "name": "git-list-pack",
+  "version": "0.0.0",
+  "description": "create a readable stream of a packfile's contents, sans an index file",
+  "main": "index.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/chrisdickinson/git-list-pack.git"
+  },
+  "keywords": [
+    "git",
+    "packfile",
+    "unpack",
+    "stream"
+  ],
+  "author": "Chris Dickinson <chris@neversaw.us>",
+  "license": "MIT",
+  "dependencies": {
+    "through": "~2.2.7",
+    "inflate-until": "0.0.6"
+  },
+  "devDependencies": {
+    "tape": "0.3.1"
+  }
+}
