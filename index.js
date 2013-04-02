@@ -44,16 +44,17 @@ function unpack() {
 
   var inflate_until
 
-  var version
-    , offset = 0
+  var offset = 0
     , header_size = 0
+
+  var expanded_size
     , object_count
-    , expanded_size
     , last_object
     , reference
     , last_type
-    , type
+    , version
     , cksum
+    , type
 
   var want = 4 
 
@@ -150,6 +151,9 @@ function unpack() {
       var byt = accum[accum.length - 1].readUInt8(0)
         , buffer
 
+      reference = reference || []
+      reference.push(byt)
+
       if(!(byt & 0x80)) {
         become(STATE_INFLATE)
         inflate_until = inflate(expanded_size, got_inflate)
@@ -179,17 +183,18 @@ function unpack() {
     last_type = type
 
     stream.queue(last_object = {
-        type: last_type
-      , offset: offset
+        reference: reference
       , data: info.data
-      , compressed: info.compressed
-      , header_size: header_size
+      , type: last_type
+      , offset: offset
+      , num: expect - 1
     })
 
     offset += info.compressed + header_size
     become(--expect ? STATE_OBJECT_HEADER : STATE_TRAILER_CKSUM)
     header_size = 0
 
+    reference = null
     buffer.unshift(info.rest)
     while(buffer.length && state !== STATE_BUFFERING) {
       write(buffer.shift())
