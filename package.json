@@ -1,6 +1,6 @@
 {
   "name": "git-list-pack",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "create a readable stream of a packfile's contents, sans an index file",
   "main": "index.js",
   "scripts": {
