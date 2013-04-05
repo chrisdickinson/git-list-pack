@@ -155,6 +155,7 @@ function unpack() {
       reference.push(byt)
 
       if(!(byt & 0x80)) {
+        reference = new Buffer(reference)
         become(STATE_INFLATE)
         inflate_until = inflate(expanded_size, got_inflate)
         return buf
@@ -184,7 +185,7 @@ function unpack() {
 
     stream.queue(last_object = {
         reference: reference
-      , data: info.data
+      , data: Array.isArray(info.data) ? new Buffer(info.data) : info.data
       , type: last_type
       , offset: offset
       , num: expect - 1
