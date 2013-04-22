@@ -144,7 +144,7 @@ function unpack() {
 
   function start_inflate() {
     states[0] = write_inflate
-    inflate_stream = inflate()
+    inflate_stream = inflate_stream ? inflate_stream.recycle() : inflate()
     inflated_fragments.length = 0
     inflate_finished = false
 
