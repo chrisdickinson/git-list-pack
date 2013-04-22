@@ -4,18 +4,6 @@ var through = require('through')
   , inflate = require('inflate')
   , Buffer = require('buffer').Buffer
 
-var _ = -1 
-  , STATE_HEADER_SIG = ++_
-  , STATE_HEADER_VERSION = ++_
-  , STATE_HEADER_OBJECT_COUNT = ++_
-  , STATE_OBJECT_HEADER = ++_
-  , STATE_OBJECT = ++_
-  , STATE_OBJECT_OFS_DELTA = ++_
-  , STATE_OBJECT_REF_DELTA = ++_
-  , STATE_INFLATE = ++_
-  , STATE_BUFFERING = ++_
-  , STATE_TRAILER_CKSUM = ++_
-
 var OFS_DELTA = 6
   , REF_DELTA = 7
 
