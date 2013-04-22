@@ -20,7 +20,6 @@
   "license": "MIT",
   "dependencies": {
     "through": "~2.2.7",
-    "inflate-until": "0.0.6",
     "inflate": "0.0.2"
   },
   "devDependencies": {
