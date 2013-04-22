@@ -1,7 +1,7 @@
-module.exports = unpack 
+module.exports = unpack
 
 var through = require('through')
-  , inflate = require('inflate-until')
+  , inflate = require('inflate')
   , Buffer = require('buffer').Buffer
 
 var _ = -1 
@@ -16,237 +16,282 @@ var _ = -1
   , STATE_BUFFERING = ++_
   , STATE_TRAILER_CKSUM = ++_
 
-var STATES = [
-    'STATE_HEADER_SIG'
-  , 'STATE_HEADER_VERSION'
-  , 'STATE_HEADER_OBJECT_COUNT'
-  , 'STATE_OBJECT_HEADER'
-  , 'STATE_OBJECT'
-  , 'STATE_OBJECT_OFS_DELTA'
-  , 'STATE_OBJECT_REF_DELTA'
-  , 'STATE_INFLATE'
-  , 'STATE_BUFFERING'
-  , 'STATE_TRAILER_CKSUM'
-]
-
 var OFS_DELTA = 6
   , REF_DELTA = 7
 
 function unpack() {
-  var stream = through(write_, end)
-    , state = STATE_HEADER_SIG
-    , should_break = false
+  var stream = through(write, end)
+    , need_input = false
+    , states = []
+    , state = null
+    , ended = false
     , buffer = []
-    , accum = []
     , got = 0
-    , expect
-    , all
 
-  var inflate_until
+  var buffer_offset = 0
 
-  var offset = 0
+  var inflate_stream = null
+    , inflated_fragments = []
+    , inflate_finished = false
+
+  var offset = 12 
     , header_size = 0
+
+  var current_object_header = []
+    , current_ofs_header = []
 
   var expanded_size
     , object_count
-    , last_object
+    , prev_object
     , reference
-    , last_type
     , version
     , cksum
     , type
+    , last
 
-  var want = 4 
+  stream.on('resume', function() {
+    execute()
+  })
+
+  var byte_need = 0
+    , byte_accum = []
+
+  want_bytes(4); become(bytes, got_header)
 
   return stream
 
-  function write_(buf) {
-    write(buf)
-  }
-
-  function end(buf) {
+  function want_bytes(num) {
+    byte_need = num
+    byte_accum.length = 0
   }
 
   function write(buf) {
-    while(!should_break && buf.length) {
-      switch(state) {
-        case STATE_HEADER_SIG: buf = read_signature(buf); break
-        case STATE_HEADER_VERSION: buf = read_version(buf); break
-        case STATE_HEADER_OBJECT_COUNT: buf = read_object_count(buf); break
-        case STATE_OBJECT_HEADER: buf = read_object_header(buf); break
-        case STATE_OBJECT_OFS_DELTA: buf = read_ofs_delta(buf); break
-        case STATE_OBJECT_REF_DELTA: buf = read_ref_delta(buf); break
-        case STATE_OBJECT: buf = read_object(buf); break
-        case STATE_INFLATE: buf = read_inflate(buf); break
-        case STATE_BUFFERING: buffer.push(buf); should_break = true; break
-        case STATE_TRAILER_CKSUM: buf = read_cksum(buf); break
+    buffer.push(buf)
+    got += buf.length
+
+    if(!ended) {
+      execute()
+    }
+  }
+
+  function end() {
+    //stream.queue(null)
+  }
+
+  function got_header() {
+    for(var i = 0, len = 4; i < len; ++i) {
+      if(last[i] !== 'PACK'.charCodeAt(i)) {
+        stream.emit('error', new Error(
+          'invalid header'
+        ))
+        return
       }
     }
-    should_break = false
+    want_bytes(4); become(bytes, got_header_version)
   }
 
-  function read_signature(buf) {
-    if(got === 4) {
-      if((Buffer.concat(accum, 4)+'') !== 'PACK') {
-        stream.emit('error', new Error('invalid header'))
-        return []
-      }
-      become(STATE_HEADER_VERSION)
-      return buf
-    }
-    return take(4 - got, buf)
+  function got_header_version() {
+    // no-op for now
+    want_bytes(4); become(bytes, got_object_count)
   }
 
-  function read_version(buf) { 
-    if(got === 4) {
-      version = Buffer.concat(accum, got).readUInt32BE(0)
-      become(STATE_HEADER_OBJECT_COUNT)
-      return buf
-    }    
-    return take(4 - got, buf)
+  function got_object_count() {
+    object_count = last[3] | (last[2] << 8) | (last[1] << 16) | (last[0] << 24)
+    object_count >>>= 0 
+    want_bytes(1); become(bytes, start_object_header)
   }
 
-  function read_object_count(buf) {
-    // read object count
-    if(got === 4) {
-      expect = object_count = Buffer.concat(accum, got).readUInt32BE(0)
-      become(expect ? STATE_OBJECT_HEADER : STATE_TRAILER_CKSUM)
-      return buf
-    }    
-    return take(4 - got, buf)
-  } 
-
-  function read_object_header(buf) {
-    var byt = buf.readUInt8(0)
-    if(!(byt & 0x80)) {
-      accum.push(buf.slice(0, 1))
-      ++got
-
-      var expanded_size_array = toarray(Buffer.concat(accum, got))
-        , size = expanded_size_array[0] & 0x0F
-        , shift = 4
-        , idx = 1
-
-      byt = expanded_size_array[0]
-      type = byt >> 4 & 7
-
-      while(idx < expanded_size_array.length) {
-        size += (expanded_size_array[idx++] & 0x7F) << shift
-        shift += 7
-      }
-
-      ++header_size
-      expanded_size = size
-      become(type < 5 ? STATE_OBJECT :
-             type === OFS_DELTA ? STATE_OBJECT_OFS_DELTA :
-             type === REF_DELTA ? STATE_OBJECT_REF_DELTA : STATE_OBJECT_HEADER)
-
-      return buf.slice(1) 
-    }
-    return take(1, buf, true)
-  }
-
-  function read_ofs_delta(buf) {
-    if(got >= 1) {
-      var byt = accum[accum.length - 1].readUInt8(0)
-        , buffer
-
-      reference = reference || []
-      reference.push(byt)
-
-      if(!(byt & 0x80)) {
-        reference = new Buffer(reference)
-        become(STATE_INFLATE)
-        inflate_until = inflate(expanded_size, got_inflate)
-        return buf
-      }
-    }
-    return take(1, buf, true)
-  }
-
-  function read_ref_delta(buf) {
-    if(got === 20) {
-      reference = Buffer.concat(accum, got)
-      inflate_until = inflate(expanded_size, got_inflate)
-      become(STATE_INFLATE)
-      return buf
-    }
-    return take(20 - got, buf, true)
-  }
-
-  function read_object(buf) {
-    inflate_until = inflate(expanded_size, got_inflate)
-    become(STATE_INFLATE)
-    return buf
-  }
-  
-  function got_inflate(info) {
-    last_type = type
-
-    stream.queue(last_object = {
-        reference: reference
-      , data: Array.isArray(info.data) ? new Buffer(info.data) : info.data
-      , type: last_type
-      , offset: offset
-      , num: expect - 1
-    })
-
-    offset += info.compressed + header_size
-    become(--expect ? STATE_OBJECT_HEADER : STATE_TRAILER_CKSUM)
+  function start_object_header() {
+    current_object_header.length = 0
     header_size = 0
+    iter_object_header()
+  }
 
+
+  function iter_object_header() {
+    var byt = last[0]
+    current_object_header.push(byt)
+    if(!(byt & 0x80)) {
+      finish_object_header()
+    } else {
+      want_bytes(1); become(bytes, iter_object_header)
+    }
+  }
+
+  function finish_object_header() {
+    var size = current_object_header[0] & 0x0F
+      , shift = 4
+      , idx = 1
+      , byt
+
+    header_size = current_object_header.length
+    type = current_object_header[0] >> 4 & 7
+    while(idx < current_object_header.length) {
+      size += (current_object_header[idx++] & 0x7F) << shift
+      shift += 7
+    }
+
+    expanded_size = size
+
+    if(type < 5) {
+      start_inflate()
+    } else if(type === OFS_DELTA) {
+      start_ofs_delta()
+    } else if(type === REF_DELTA) {
+      start_ref_delta()
+    }
+  }
+
+  function start_inflate() {
+    states[0] = write_inflate
+    inflate_stream = inflate()
+    inflated_fragments.length = 0
+    inflate_finished = false
+
+    inflate_stream
+      .on('data', add_inflate_fragment)
+      .on('unused', finish_inflate)
+  }
+
+  function add_inflate_fragment(d) {
+    inflated_fragments.push(d)
+  }
+
+  function write_inflate() {
+    var next
+    while(buffer.length && !inflate_finished) {
+      next = buffer.shift()
+      if(buffer_offset) {
+        if(buffer_offset === next.length) {
+          buffer_offset = 0
+          continue
+        }
+        next = next.slice(buffer_offset)
+        buffer_offset = 0
+      }
+      got -= next.length
+      inflate_stream.write(next)
+    }
+    if(!buffer.length && !inflate_finished) {
+      need_input = true
+    }
+  }
+
+  function finish_inflate(unused, read) {
+    inflate_finished = true
+    stream.queue(prev_object = {
+        reference: reference
+      , data: Buffer.concat(inflated_fragments)
+      , type: type
+      , offset: offset
+      , num: object_count - 1
+    }) 
+
+    offset += read + header_size + (reference ? reference.length : 0)
+    header_size = 0
+    --object_count
     reference = null
-    buffer.unshift(info.rest)
-    while(buffer.length && state !== STATE_BUFFERING) {
-      write(buffer.shift())
+
+    if(unused.length) {
+      buffer = unused.concat(buffer)
+      for(var i = 0, len = unused.length; i < len; ++i) {
+        got += unused[i].length
+      }
+      buffer_offset = 0
+    }
+
+    if(!object_count) {
+      want_bytes(20); become(bytes, got_checksum)
+    } else {
+      want_bytes(1); become(bytes, start_object_header)
     }
   }
 
-  function read_inflate(buf) {
-    become(STATE_BUFFERING)
-    inflate_until(buf, function(info) {
-      if(info) {
-        return got_inflate(info)
-      }
-      become(STATE_INFLATE)
-      if(buffer.length) {
-        write(buffer.shift())
-      }
-    })
-    should_break = true
-    return []
+  function start_ofs_delta() {
+    current_ofs_header.length = 0
+    iter_ofs_delta()
   }
 
-  function read_cksum(buf) {
-    if(got === 20 || (buf.length === 20 && got === 0)) {
-      // and we've got the checksum
-      stream.queue(null)
-      should_break = true
-      return
+  function iter_ofs_delta() {
+    var byt = last[0]
+    current_ofs_header.push(byt)
+    if(!(byt & 0x80)) {
+      reference = new Buffer(current_ofs_header)
+      start_inflate()
+    } else {
+      want_bytes(1); become(bytes, iter_ofs_delta)
     }
-    return take(20 - got, buf)
   }
 
-  function become(st) {
-    got =
-    accum.length = 0
-    state = st
-  }
-
-  function take(n, buf, noincr) {
-    var upto = Math.min(buf.length, n)
-    accum.push(buf.slice(0, upto))
-    got += upto
-    if(!noincr) offset += upto
-    else header_size += upto
-    return buf.slice(upto)
+  function start_ref_delta() {
+    want_bytes(20); become(bytes, got_ref_delta_reference) 
   } 
-}
 
-function toarray(buf) {
-  var arr = []
-  for(var i = 0, len = buf.length; i < len; ++i) {
-    arr[i] = buf.readUInt8(i)
+  function got_ref_delta_reference() {
+    reference = new Buffer(last)
+    start_inflate()
   }
-  return arr
+
+  function got_checksum() {
+    stream.emit('checksum', new Buffer(last))
+    stream.queue(null)
+    ended = true
+  }
+
+  function execute() {
+    while(1) {
+      states[0]()
+      if(need_input || ended) {
+        break
+      }
+    }
+    need_input = false
+  }
+
+  function bytes() {
+    var value
+    while(byte_need--) {
+      value = take()
+      if(need_input) {
+        byte_need += 1
+        break
+      }
+      byte_accum[byte_accum.length] = value
+    }
+    if(!need_input) {
+      unbecome(byte_accum)
+    }
+  }
+
+  function take() {
+    var val
+    if(!buffer.length) {
+      need_input = true
+    } else if(buffer_offset === buffer[0].length) {
+      buffer.shift()
+      buffer_offset = 0
+      val = take()
+    } else {
+      val = buffer[0].readUInt8(buffer_offset++)
+    }
+    return val
+  }
+
+  function become(fn, then) {
+    if(typeof then !== 'function') {
+      throw new Error
+    }
+    last = null
+    if(states.length < 1) {
+      states.unshift(then)
+    } else {
+      states[0] = then
+    }
+    states.unshift(fn)
+  }
+
+  function unbecome(result) {
+    states.shift()
+    last = result
+  }
 }
