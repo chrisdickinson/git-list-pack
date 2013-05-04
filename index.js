@@ -2,7 +2,7 @@ module.exports = unpack
 
 var through = require('through')
   , inflate = require('inflate')
-  , Buffer = require('buffer').Buffer
+  , binary = require('bops')
 
 var OFS_DELTA = 6
   , REF_DELTA = 7
@@ -154,7 +154,7 @@ function unpack() {
           buffer_offset = 0
           continue
         }
-        next = next.slice(buffer_offset)
+        next = binary.subarray(next, buffer_offset)
         buffer_offset = 0
       }
       got -= next.length
@@ -169,7 +169,7 @@ function unpack() {
     inflate_finished = true
     stream.queue(prev_object = {
         reference: reference
-      , data: Buffer.concat(inflated_fragments)
+      , data: binary.join(inflated_fragments)
       , type: type
       , offset: offset
       , num: object_count - 1
@@ -204,7 +204,7 @@ function unpack() {
     var byt = last[0]
     current_ofs_header.push(byt)
     if(!(byt & 0x80)) {
-      reference = new Buffer(current_ofs_header)
+      reference = binary.from(current_ofs_header)
       start_inflate()
     } else {
       want_bytes(1); become(bytes, iter_ofs_delta)
@@ -216,12 +216,12 @@ function unpack() {
   } 
 
   function got_ref_delta_reference() {
-    reference = new Buffer(last)
+    reference = binary.from(last)
     start_inflate()
   }
 
   function got_checksum() {
-    stream.emit('checksum', new Buffer(last))
+    stream.emit('checksum', binary.from(last))
     stream.queue(null)
     ended = true
   }
@@ -260,7 +260,7 @@ function unpack() {
       buffer_offset = 0
       val = take()
     } else {
-      val = buffer[0].readUInt8(buffer_offset++)
+      val = buffer[0][buffer_offset++]
     }
     return val
   }
