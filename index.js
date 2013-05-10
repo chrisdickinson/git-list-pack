@@ -40,7 +40,6 @@ function unpack() {
   }
 
   function end() {
-    console.log('got buf', accum.length, cb)
   }
 
   function read(close, callback) {
