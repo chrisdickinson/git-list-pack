@@ -1,6 +1,6 @@
 module.exports = unpack
 
-var inflate = require('inflate/min')
+var inflate = require('inflate/min.js')
   , binary = require('bops')
 
 var OFS_DELTA = 6
@@ -22,7 +22,7 @@ function unpack(read, oncksum) {
     , inflate_finished = false
     , _inflate_wants
 
-  var offset = 12 
+  var offset = 12
     , header_size = 0
 
   var current_object_header = []
@@ -50,7 +50,7 @@ function unpack(read, oncksum) {
   stream.is = 'min-stream-pull-filter'
 
   return stream
-  
+
   function stream(close, callback) {
     if(queued.length) {
       var out = queued.shift()
@@ -113,7 +113,7 @@ function unpack(read, oncksum) {
 
   function got_object_count() {
     object_count = last[3] | (last[2] << 8) | (last[1] << 16) | (last[0] << 24)
-    object_count >>>= 0 
+    object_count >>>= 0
     want_bytes(1); become(bytes, start_object_header)
   }
 
@@ -213,7 +213,7 @@ function unpack(read, oncksum) {
       , type: type
       , offset: offset
       , num: object_count - 1
-    }) 
+    })
 
     offset += read + header_size + (reference ? reference.length : 0)
     header_size = 0
@@ -252,8 +252,8 @@ function unpack(read, oncksum) {
   }
 
   function start_ref_delta() {
-    want_bytes(20); become(bytes, got_ref_delta_reference) 
-  } 
+    want_bytes(20); become(bytes, got_ref_delta_reference)
+  }
 
   function got_ref_delta_reference() {
     reference = binary.from(last)
