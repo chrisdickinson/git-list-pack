@@ -1,6 +1,6 @@
 module.exports = unpack
 
-var inflate = require('inflate')
+var inflate = require('inflate/min')
   , binary = require('bops')
 
 var OFS_DELTA = 6
@@ -18,7 +18,9 @@ function unpack(read, oncksum) {
 
   var inflate_stream = null
     , inflated_fragments = []
+    , uninflated_fragments = []
     , inflate_finished = false
+    , _inflate_wants
 
   var offset = 12 
     , header_size = 0
@@ -158,17 +160,29 @@ function unpack(read, oncksum) {
 
   function start_inflate() {
     states[0] = write_inflate
-    inflate_stream = inflate_stream ? inflate_stream.recycle() : inflate()
+    inflate_stream = inflate_stream ? inflate_stream.recycle() : inflate(inflate_read, finish_inflate)
     inflated_fragments.length = 0
     inflate_finished = false
 
-    inflate_stream
-      .on('data', add_inflate_fragment)
-      .on('unused', finish_inflate)
+    iter()
+
+    function iter() {
+      inflate_stream(null, function(err, data) {
+        inflated_fragments.push(data)
+        iter()
+      })
+    }
   }
 
-  function add_inflate_fragment(d) {
-    inflated_fragments.push(d)
+  function inflate_read(close, ready) {
+    if(close === true) {
+      return
+    }
+
+    if(close) {
+      return emit(close)
+    }
+    _inflate_wants = ready
   }
 
   function write_inflate() {
@@ -184,7 +198,7 @@ function unpack(read, oncksum) {
         buffer_offset = 0
       }
       got -= next.length
-      inflate_stream.write(next)
+      _inflate_wants(null, next)
     }
     if(!buffer.length && !inflate_finished) {
       need_input = true
