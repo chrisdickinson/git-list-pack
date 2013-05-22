@@ -168,6 +168,9 @@ function unpack(read, oncksum) {
 
     function iter() {
       inflate_stream(null, function(err, data) {
+        if(err) {
+          return emit(err)
+        }
         inflated_fragments.push(data)
         iter()
       })
@@ -237,7 +240,7 @@ function unpack(read, oncksum) {
 
   function start_ofs_delta() {
     current_ofs_header.length = 0
-    iter_ofs_delta()
+    want_bytes(1); become(bytes, iter_ofs_delta)
   }
 
   function iter_ofs_delta() {
