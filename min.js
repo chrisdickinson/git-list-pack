@@ -31,7 +31,7 @@ function unpack(read, oncksum) {
   var expanded_size
     , object_count
     , prev_object
-    , reference
+    , reference = null
     , version
     , cksum
     , type
@@ -65,7 +65,7 @@ function unpack(read, oncksum) {
   }
 
   function onread(err, buf) {
-    if(err) {
+    if(buf === undefined) {
       return read(err)
     }
     return write(buf)
