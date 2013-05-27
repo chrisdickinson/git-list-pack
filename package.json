@@ -21,7 +21,7 @@
   "dependencies": {
     "through": "~2.2.7",
     "inflate": "0.0.5",
-    "bops": "0.0.3"
+    "bops": "~0.0.6"
   },
   "devDependencies": {
     "tape": "~1.0.1"
